@@ -1,6 +1,6 @@
 # File Organizer
 
-A command-line tool that automatically sorts files in a directory into category subfolders (Images, Documents, Videos, Audio, Archives, Code) based on file extension — built for cleaning up folders like Downloads without doing it by hand.
+A command line tool that automatically sorts files in a directory into category subfolders (Images, Documents, Videos, Audio, Archives, Code) based on file extension built for cleaning up folders like Downloads without doing it by hand.
 
 ## Demo
 
@@ -15,9 +15,9 @@ $ python main.py --path ~/Downloads --dry-run
 
 ## Features
 
-- **Automatic classification** — sorts files into Images, Documents, Videos, Audio, Archives, Code, and Other based on extension
-- **Dry-run mode** — preview exactly what will move before anything actually happens, using `--dry-run`
-- **Collision-safe** — if a destination filename already exists, the file is renamed (`photo_1.jpg`, `photo_2.jpg`, ...) instead of silently overwriting existing data
+- **Automatic classification** sorts files into Images, Documents, Videos, Audio, Archives, Code, and Other based on extension
+- **Dry run mode** — preview exactly what will move before anything actually happens, using `--dry-run`
+- **Collision safe** — if a destination filename already exists, the file is renamed (`photo_1.jpg`, `photo_2.jpg`, ...) instead of silently overwriting existing data
 - **Logging** — every run writes a timestamped `.log` file into the target directory, so every move is auditable and traceable after the fact
 - **Zero dependencies** — built entirely on the Python standard library (`pathlib`, `shutil`, `argparse`, `logging`); nothing to install
 
@@ -68,10 +68,10 @@ python -m unittest discover tests
 
 ## What I Learned
 
-Separating "decide what should happen" (`classifier.py`) from "actually do it" (`mover.py`) made the dry-run feature almost free to implement — the same code path calculates the plan whether or not it executes it. I also learned the difference between catching a specific exception like `PermissionError` versus a bare `except:` — the specific version lets me handle expected failures (a locked file) while letting unexpected bugs surface loudly instead of hiding silently.
+Separating "decide what should happen" (`classifier.py`) from "actually do it" (`mover.py`) made the dry run feature almost free to implement the same code path calculates the plan whether or not it executes it. I also learned the difference between catching a specific exception like `PermissionError` versus a bare `except:` the specific version lets me handle expected failures (a locked file) while letting unexpected bugs surface loudly instead of hiding silently.
 
 ## Future Improvements
-- [ ] User-defined category rules via a JSON config file, instead of hardcoded extensions
+- [ ] User defined category rules via a JSON config file, instead of hardcoded extensions
 - [ ] `--undo` flag that reverses the last run using the log file
 - [ ] Optional recursive mode for subdirectories
 
