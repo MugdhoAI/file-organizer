@@ -9,15 +9,17 @@ file extension.
 Usage:
     python main.py --path ~/Downloads
     python main.py --path ~/Downloads --dry-run
+    python main.py --path ~/Downloads --recursive
 """
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from src.classifier import classify
+from src.classifier import CATEGORIES, classify
 from src.mover import move_file
 
 
@@ -50,7 +52,28 @@ def setup_logging(target_root: Path) -> logging.Logger:
     return logger
 
 
-def organize(target_path: str, dry_run: bool = False) -> dict:
+def collect_files(target_root: Path, recursive: bool) -> list[Path]:
+    """
+    Gather the files to organize.
+
+    Non-recursive mode only looks at files directly in target_root.
+    Recursive mode walks subdirectories but never descends into
+    category folders created by earlier runs, or into hidden folders.
+    """
+    if not recursive:
+        return [f for f in target_root.iterdir() if f.is_file()]
+
+    files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(target_root):
+        dirnames[:] = [
+            d for d in dirnames if d not in CATEGORIES and not d.startswith(".")
+        ]
+        for name in filenames:
+            files.append(Path(dirpath) / name)
+    return files
+
+
+def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -> dict:
     """
     Run the organizer against a target directory.
 
@@ -58,6 +81,7 @@ def organize(target_path: str, dry_run: bool = False) -> dict:
         target_path: Path to the directory to organize, as a string
             (e.g. from CLI args).
         dry_run: If True, prints/logs the plan without moving files.
+        recursive: If True, also organize files in subdirectories.
 
     Returns:
         A summary dict with moved count, skipped count, and dry_run flag.
@@ -74,17 +98,13 @@ def organize(target_path: str, dry_run: bool = False) -> dict:
     mode_label = "DRY RUN" if dry_run else "LIVE"
     logger.info(f"Starting organizer on {target_root} [{mode_label}]")
 
-    # Only scan files directly in target_root, not subfolders — otherwise
-    # the script would recurse into the very category folders it just
-    # created, which causes chaos on a second run.
-    #
     # Hidden files (dotfiles) are never moved: sorting .env or .bashrc
     # into Other would be a nasty surprise. The .log files written by
     # earlier runs are skipped too.
+    candidates = collect_files(target_root, recursive)
     files = [
-        f for f in target_root.iterdir()
-        if f.is_file() and not f.name.startswith(".")
-        and not f.name.endswith(".log")
+        f for f in candidates
+        if not f.name.startswith(".") and not f.name.endswith(".log")
     ]
 
     if not files:
@@ -124,10 +144,15 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Preview what would happen without moving any files."
     )
+    parser.add_argument(
+        "--recursive", action="store_true",
+        help="Also organize files in subdirectories. Category folders "
+        "and hidden folders are never descended into."
+    )
     args = parser.parse_args()
 
     try:
-        organize(args.path, dry_run=args.dry_run)
+        organize(args.path, dry_run=args.dry_run, recursive=args.recursive)
     except NotADirectoryError as e:
         print(f"Error: {e}")
         sys.exit(1)

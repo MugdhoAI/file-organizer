@@ -1,6 +1,7 @@
 """
 Unit tests for the file organizer: classification, collision handling,
-file moves, and full organize() runs, including dry run.
+file moves, and full organize() runs, including dry run, hidden files,
+recursive mode, and repeated runs in one process.
 
 Run from the repo root with:
     python -m unittest discover tests
@@ -10,8 +11,9 @@ import logging
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from main import organize
+from main import collect_files, main, organize
 from src.classifier import CATEGORIES, CATEGORY_MAP, classify
 from src.mover import move_file, resolve_destination
 
@@ -31,13 +33,12 @@ class TestClassify(unittest.TestCase):
             "sheet.xlsx": "Documents", "data.csv": "Documents",
             "clip.mp4": "Videos", "movie.mkv": "Videos",
             "song.mp3": "Audio", "track.flac": "Audio",
-            "backup.zip": "Archives", "archive.tar": "Archives",
-            "script.py": "Code", "app.js": "Code", "page.html": "Code",
+            "backup.zip": "Archives", "archive.tar.gz": "Archives",
+            "script.py": "Code", "app.ts": "Code", "page.html": "Code",
         }
         for name, expected in cases.items():
             with self.subTest(name=name):
                 self.assertEqual(classify(Path(name)), expected)
-
 
     def test_new_extensions_added_to_map(self):
         cases = {
@@ -49,9 +50,6 @@ class TestClassify(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(classify(Path(name)), expected)
 
-    def test_categories_cover_every_mapped_value(self):
-        self.assertEqual(set(CATEGORIES), set(CATEGORY_MAP.values()) | {"Other"})
-
     def test_unknown_extension_falls_back_to_other(self):
         self.assertEqual(classify(Path("weird.xyz")), "Other")
 
@@ -60,6 +58,9 @@ class TestClassify(unittest.TestCase):
 
     def test_extension_match_is_case_insensitive(self):
         self.assertEqual(classify(Path("PHOTO.JPG")), "Images")
+
+    def test_categories_cover_every_mapped_value(self):
+        self.assertEqual(set(CATEGORIES), set(CATEGORY_MAP.values()) | {"Other"})
 
 
 class TestResolveDestination(unittest.TestCase):
@@ -112,7 +113,7 @@ class TestMoveFile(unittest.TestCase):
 
 
 class TestOrganize(unittest.TestCase):
-    def test_live_run_sorts_files(self):
+    def test_live_run_sorts_files_and_returns_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_file(root, "photo.jpg")
@@ -124,7 +125,7 @@ class TestOrganize(unittest.TestCase):
             self.assertTrue((root / "Documents" / "report.pdf").exists())
             self.assertTrue((root / "Audio" / "song.mp3").exists())
 
-    def test_dry_run_moves_nothing(self):
+    def test_dry_run_moves_nothing_but_counts_the_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_file(root, "photo.jpg")
@@ -145,7 +146,14 @@ class TestOrganize(unittest.TestCase):
             with self.assertRaises(NotADirectoryError):
                 organize(str(Path(tmp) / "missing"))
 
-
+    def test_collision_renames_instead_of_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "Images", "photo.jpg", "original")
+            make_file(root, "photo.jpg", "new")
+            organize(str(root))
+            self.assertEqual((root / "Images" / "photo.jpg").read_text(), "original")
+            self.assertEqual((root / "Images" / "photo_1.jpg").read_text(), "new")
 
     def test_hidden_files_are_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -165,14 +173,78 @@ class TestOrganize(unittest.TestCase):
             logger = logging.getLogger("file_organizer")
             self.assertEqual(len(logger.handlers), 2)
 
-    def test_collision_renames_instead_of_overwriting(self):
+    def test_recursive_moves_nested_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            make_file(root / "Images", "photo.jpg", "original")
-            make_file(root, "photo.jpg", "new")
-            organize(str(root))
-            self.assertEqual((root / "Images" / "photo.jpg").read_text(), "original")
-            self.assertEqual((root / "Images" / "photo_1.jpg").read_text(), "new")
+            make_file(root / "sub" / "deep", "song.mp3")
+            make_file(root, "top.jpg")
+            summary = organize(str(root), recursive=True)
+            self.assertEqual(summary["moved"], 2)
+            self.assertTrue((root / "Audio" / "song.mp3").exists())
+            self.assertTrue((root / "Images" / "top.jpg").exists())
+
+    def test_recursive_skips_files_already_in_category_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "Images", "old.jpg")
+            summary = organize(str(root), recursive=True)
+            self.assertEqual(summary["moved"], 0)
+            self.assertTrue((root / "Images" / "old.jpg").exists())
+
+    def test_non_recursive_leaves_nested_files_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            nested = make_file(root / "sub", "song.mp3")
+            summary = organize(str(root))
+            self.assertEqual(summary["moved"], 0)
+            self.assertTrue(nested.exists())
+
+
+class TestCollectFiles(unittest.TestCase):
+    def test_non_recursive_only_sees_top_level(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "top.jpg")
+            make_file(root / "sub", "nested.jpg")
+            names = {f.name for f in collect_files(root, recursive=False)}
+            self.assertEqual(names, {"top.jpg"})
+
+    def test_recursive_skips_hidden_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / ".hidden", "secret.jpg")
+            make_file(root, "top.jpg")
+            names = {f.name for f in collect_files(root, recursive=True)}
+            self.assertEqual(names, {"top.jpg"})
+
+
+class TestCli(unittest.TestCase):
+    def test_main_dry_run_moves_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            with mock.patch("sys.argv", ["main.py", "--path", tmp, "--dry-run"]):
+                main()
+            self.assertTrue((root / "photo.jpg").exists())
+            self.assertFalse((root / "Images").exists())
+
+    def test_main_recursive_flag_reaches_organize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "sub", "song.mp3")
+            with mock.patch(
+                "sys.argv", ["main.py", "--path", tmp, "--recursive"]
+            ):
+                main()
+            self.assertTrue((root / "Audio" / "song.mp3").exists())
+
+    def test_main_invalid_path_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = str(Path(tmp) / "missing")
+            with mock.patch("sys.argv", ["main.py", "--path", bad]):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+            self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == "__main__":
