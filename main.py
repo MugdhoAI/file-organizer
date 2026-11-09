@@ -32,6 +32,12 @@ def setup_logging(target_root: Path) -> logging.Logger:
     logger = logging.getLogger("file_organizer")
     logger.setLevel(logging.INFO)
 
+    # Remove handlers left by any earlier organize() call in this
+    # process, otherwise every line would be written once per call.
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()
+
     file_handler = logging.FileHandler(log_file)
     console_handler = logging.StreamHandler(sys.stdout)
 

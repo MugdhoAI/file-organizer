@@ -126,6 +126,16 @@ class TestOrganize(unittest.TestCase):
             with self.assertRaises(NotADirectoryError):
                 organize(str(Path(tmp) / "missing"))
 
+
+    def test_second_run_does_not_duplicate_log_handlers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            organize(str(root))
+            organize(str(root))
+            logger = logging.getLogger("file_organizer")
+            self.assertEqual(len(logger.handlers), 2)
+
     def test_collision_renames_instead_of_overwriting(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
