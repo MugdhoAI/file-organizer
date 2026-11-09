@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 from main import organize
-from src.classifier import classify
+from src.classifier import CATEGORIES, CATEGORY_MAP, classify
 from src.mover import move_file, resolve_destination
 
 
@@ -37,6 +37,20 @@ class TestClassify(unittest.TestCase):
         for name, expected in cases.items():
             with self.subTest(name=name):
                 self.assertEqual(classify(Path(name)), expected)
+
+
+    def test_new_extensions_added_to_map(self):
+        cases = {
+            "pic.bmp": "Images", "pic.tiff": "Images", "book.epub": "Documents",
+            "clip.webm": "Videos", "podcast.ogg": "Audio",
+            "bundle.tar.xz": "Archives", "app.go": "Code", "query.sql": "Code",
+        }
+        for name, expected in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(classify(Path(name)), expected)
+
+    def test_categories_cover_every_mapped_value(self):
+        self.assertEqual(set(CATEGORIES), set(CATEGORY_MAP.values()) | {"Other"})
 
     def test_unknown_extension_falls_back_to_other(self):
         self.assertEqual(classify(Path("weird.xyz")), "Other")
