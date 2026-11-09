@@ -50,7 +50,7 @@ def setup_logging(target_root: Path) -> logging.Logger:
     return logger
 
 
-def organize(target_path: str, dry_run: bool = False) -> None:
+def organize(target_path: str, dry_run: bool = False) -> dict:
     """
     Run the organizer against a target directory.
 
@@ -58,6 +58,9 @@ def organize(target_path: str, dry_run: bool = False) -> None:
         target_path: Path to the directory to organize, as a string
             (e.g. from CLI args).
         dry_run: If True, prints/logs the plan without moving files.
+
+    Returns:
+        A summary dict with moved count, skipped count, and dry_run flag.
 
     Raises:
         NotADirectoryError: If target_path doesn't point to a real directory.
@@ -74,11 +77,19 @@ def organize(target_path: str, dry_run: bool = False) -> None:
     # Only scan files directly in target_root, not subfolders — otherwise
     # the script would recurse into the very category folders it just
     # created, which causes chaos on a second run.
-    files = [f for f in target_root.iterdir() if f.is_file() and not f.name.endswith(".log")]
+    #
+    # Hidden files (dotfiles) are never moved: sorting .env or .bashrc
+    # into Other would be a nasty surprise. The .log files written by
+    # earlier runs are skipped too.
+    files = [
+        f for f in target_root.iterdir()
+        if f.is_file() and not f.name.startswith(".")
+        and not f.name.endswith(".log")
+    ]
 
     if not files:
         logger.info("No files found to organize.")
-        return
+        return {"moved": 0, "skipped": 0, "dry_run": dry_run}
 
     moved_count = 0
     skipped_count = 0
@@ -98,6 +109,7 @@ def organize(target_path: str, dry_run: bool = False) -> None:
             skipped_count += 1
 
     logger.info(f"Done. {moved_count} file(s) organized, {skipped_count} skipped.")
+    return {"moved": moved_count, "skipped": skipped_count, "dry_run": dry_run}
 
 
 def main() -> None:

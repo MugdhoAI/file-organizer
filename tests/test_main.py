@@ -118,7 +118,8 @@ class TestOrganize(unittest.TestCase):
             make_file(root, "photo.jpg")
             make_file(root, "report.pdf")
             make_file(root, "song.mp3")
-            organize(str(root))
+            summary = organize(str(root))
+            self.assertEqual(summary, {"moved": 3, "skipped": 0, "dry_run": False})
             self.assertTrue((root / "Images" / "photo.jpg").exists())
             self.assertTrue((root / "Documents" / "report.pdf").exists())
             self.assertTrue((root / "Audio" / "song.mp3").exists())
@@ -127,19 +128,33 @@ class TestOrganize(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_file(root, "photo.jpg")
-            organize(str(root), dry_run=True)
+            summary = organize(str(root), dry_run=True)
+            self.assertEqual(summary, {"moved": 1, "skipped": 0, "dry_run": True})
             self.assertTrue((root / "photo.jpg").exists())
             self.assertFalse((root / "Images").exists())
 
-    def test_empty_directory_runs_without_error(self):
+    def test_empty_directory_returns_zero_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
-            organize(tmp)
+            self.assertEqual(
+                organize(tmp),
+                {"moved": 0, "skipped": 0, "dry_run": False},
+            )
 
     def test_invalid_path_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(NotADirectoryError):
                 organize(str(Path(tmp) / "missing"))
 
+
+
+    def test_hidden_files_are_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, ".env")
+            make_file(root, "photo.jpg")
+            summary = organize(str(root))
+            self.assertEqual(summary["moved"], 1)
+            self.assertTrue((root / ".env").exists())
 
     def test_second_run_does_not_duplicate_log_handlers(self):
         with tempfile.TemporaryDirectory() as tmp:
