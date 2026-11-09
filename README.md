@@ -17,8 +17,11 @@ $ python main.py --path ~/Downloads --dry-run
 
 - **Automatic classification** sorts files into Images, Documents, Videos, Audio, Archives, Code, and Other based on extension
 - **Dry run mode** previews exactly what will move before anything actually happens, using `--dry-run`
+- **Recursive mode** also organizes files in subdirectories with `--recursive`, while never descending into category folders or hidden folders
+- **Hidden files are left alone** dotfiles such as `.env` are never moved, so config files stay where they are
 - **Collision handling** renames a file if the destination filename already exists, such as `photo_1.jpg` or `photo_2.jpg`, instead of overwriting existing data
 - **Logging** writes a timestamped `.log` file into the target directory so every move can be reviewed later
+- **Run summary** `organize()` returns a dict with moved count, skipped count, and dry run flag, so scripts can check the result
 - **No external dependencies** uses only the Python standard library: `pathlib`, `shutil`, `argparse`, and `logging`
 
 ## Tech Stack
@@ -50,6 +53,9 @@ python main.py --path ~/Downloads --dry-run
 
 # Actually organize the directory
 python main.py --path ~/Downloads
+
+# Also organize files in subdirectories
+python main.py --path ~/Downloads --recursive
 ```
 
 ## Project Structure
@@ -71,6 +77,10 @@ file-organizer/
 python -m unittest discover tests
 ```
 
+The suite covers classification (including new extensions and case
+insensitivity), collision numbering, live and dry run moves, hidden
+file skipping, recursive mode, and repeated runs in one process.
+
 ## What I Learned
 
 Separating "decide what should happen" in `classifier.py` from "actually do it" in `mover.py` made the dry run feature straightforward to implement. The same code path calculates the plan whether or not it executes it. I also learned the difference between catching a specific exception such as `PermissionError` and using a bare `except:`. The specific version lets me handle expected failures, such as a locked file, while allowing unexpected bugs to surface instead of hiding them.
@@ -79,7 +89,7 @@ Separating "decide what should happen" in `classifier.py` from "actually do it" 
 
 - [ ] User defined category rules via a JSON config file instead of hardcoded extensions
 - [ ] `--undo` flag that reverses the last run using the log file
-- [ ] Optional recursive mode for subdirectories
+- [x] Optional recursive mode for subdirectories
 
 ## Author
 
