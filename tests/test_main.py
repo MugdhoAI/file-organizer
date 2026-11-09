@@ -1,119 +1,140 @@
-#!/usr/bin/env python3
 """
-File Organizer
----------------
-Scans a target directory and sorts its files into category subfolders
-(Images, Documents, Videos, Audio, Archives, Code, Other) based on
-file extension.
+Unit tests for the file organizer: classification, collision handling,
+file moves, and full organize() runs, including dry run.
 
-Usage:
-    python main.py --path ~/Downloads
-    python main.py --path ~/Downloads --dry-run
+Run from the repo root with:
+    python -m unittest discover tests
 """
 
-import argparse
 import logging
-import sys
-from datetime import datetime
+import tempfile
+import unittest
 from pathlib import Path
 
+from main import organize
 from src.classifier import classify
-from src.mover import move_file
+from src.mover import move_file, resolve_destination
 
 
-def setup_logging(target_root: Path) -> logging.Logger:
-    """
-    Configure logging to write to both a .log file inside the target
-    directory and to the console, so every run leaves an audit trail
-    of what moved where.
-    """
-    log_file = target_root / f"organizer_{datetime.now():%Y%m%d_%H%M%S}.log"
-
-    logger = logging.getLogger("file_organizer")
-    logger.setLevel(logging.INFO)
-
-    file_handler = logging.FileHandler(log_file)
-    console_handler = logging.StreamHandler(sys.stdout)
-
-    formatter = logging.Formatter("%(asctime)s | %(message)s", datefmt="%H:%M:%S")
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    return logger
+def make_file(directory: Path, name: str, content: str = "x") -> Path:
+    path = directory / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return path
 
 
-def organize(target_path: str, dry_run: bool = False) -> None:
-    """
-    Run the organizer against a target directory.
+class TestClassify(unittest.TestCase):
+    def test_known_extensions(self):
+        cases = {
+            "photo.jpg": "Images", "shot.PNG": "Images", "icon.svg": "Images",
+            "report.pdf": "Documents", "notes.txt": "Documents",
+            "sheet.xlsx": "Documents", "data.csv": "Documents",
+            "clip.mp4": "Videos", "movie.mkv": "Videos",
+            "song.mp3": "Audio", "track.flac": "Audio",
+            "backup.zip": "Archives", "archive.tar": "Archives",
+            "script.py": "Code", "app.js": "Code", "page.html": "Code",
+        }
+        for name, expected in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(classify(Path(name)), expected)
 
-    Args:
-        target_path: Path to the directory to organize, as a string
-            (e.g. from CLI args).
-        dry_run: If True, prints/logs the plan without moving files.
+    def test_unknown_extension_falls_back_to_other(self):
+        self.assertEqual(classify(Path("weird.xyz")), "Other")
 
-    Raises:
-        NotADirectoryError: If target_path doesn't point to a real directory.
-    """
-    target_root = Path(target_path).expanduser().resolve()
+    def test_no_extension_falls_back_to_other(self):
+        self.assertEqual(classify(Path("Makefile")), "Other")
 
-    if not target_root.is_dir():
-        raise NotADirectoryError(f"{target_root} is not a valid directory.")
-
-    logger = setup_logging(target_root)
-    mode_label = "DRY RUN" if dry_run else "LIVE"
-    logger.info(f"Starting organizer on {target_root} [{mode_label}]")
-
-    # Only scan files directly in target_root, not subfolders — otherwise
-    # the script would recurse into the very category folders it just
-    # created, which causes chaos on a second run.
-    files = [f for f in target_root.iterdir() if f.is_file() and not f.name.endswith(".log")]
-
-    if not files:
-        logger.info("No files found to organize.")
-        return
-
-    moved_count = 0
-    skipped_count = 0
-
-    for file_path in files:
-        category = classify(file_path)
-        try:
-            destination = move_file(file_path, category, target_root, dry_run)
-            verb = "Would move" if dry_run else "Moved"
-            logger.info(f"{verb}: {file_path.name} -> {category}/{destination.name}")
-            moved_count += 1
-        except PermissionError:
-            logger.warning(f"Skipped (permission denied): {file_path.name}")
-            skipped_count += 1
-        except OSError as e:
-            logger.warning(f"Skipped ({e}): {file_path.name}")
-            skipped_count += 1
-
-    logger.info(f"Done. {moved_count} file(s) organized, {skipped_count} skipped.")
+    def test_extension_match_is_case_insensitive(self):
+        self.assertEqual(classify(Path("PHOTO.JPG")), "Images")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Organize files in a directory into category subfolders."
-    )
-    parser.add_argument(
-        "--path", required=True,
-        help="Directory to organize, e.g. ~/Downloads"
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Preview what would happen without moving any files."
-    )
-    args = parser.parse_args()
+class TestResolveDestination(unittest.TestCase):
+    def test_no_collision_returns_plain_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            self.assertEqual(
+                resolve_destination(folder, Path("photo.jpg")),
+                folder / "photo.jpg",
+            )
 
-    try:
-        organize(args.path, dry_run=args.dry_run)
-    except NotADirectoryError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    def test_collision_appends_counter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            make_file(folder, "photo.jpg")
+            self.assertEqual(
+                resolve_destination(folder, Path("photo.jpg")),
+                folder / "photo_1.jpg",
+            )
+
+    def test_second_collision_increments_counter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            make_file(folder, "photo.jpg")
+            make_file(folder, "photo_1.jpg")
+            self.assertEqual(
+                resolve_destination(folder, Path("photo.jpg")),
+                folder / "photo_2.jpg",
+            )
+
+
+class TestMoveFile(unittest.TestCase):
+    def test_live_move_creates_category_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_file(root, "photo.jpg")
+            dest = move_file(source, "Images", root, dry_run=False)
+            self.assertEqual(dest, root / "Images" / "photo.jpg")
+            self.assertTrue(dest.exists())
+            self.assertFalse(source.exists())
+
+    def test_dry_run_moves_nothing_and_creates_no_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = make_file(root, "photo.jpg")
+            dest = move_file(source, "Images", root, dry_run=True)
+            self.assertEqual(dest, root / "Images" / "photo.jpg")
+            self.assertTrue(source.exists())
+            self.assertFalse((root / "Images").exists())
+
+
+class TestOrganize(unittest.TestCase):
+    def test_live_run_sorts_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            make_file(root, "report.pdf")
+            make_file(root, "song.mp3")
+            organize(str(root))
+            self.assertTrue((root / "Images" / "photo.jpg").exists())
+            self.assertTrue((root / "Documents" / "report.pdf").exists())
+            self.assertTrue((root / "Audio" / "song.mp3").exists())
+
+    def test_dry_run_moves_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            organize(str(root), dry_run=True)
+            self.assertTrue((root / "photo.jpg").exists())
+            self.assertFalse((root / "Images").exists())
+
+    def test_empty_directory_runs_without_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            organize(tmp)
+
+    def test_invalid_path_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(NotADirectoryError):
+                organize(str(Path(tmp) / "missing"))
+
+    def test_collision_renames_instead_of_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "Images", "photo.jpg", "original")
+            make_file(root, "photo.jpg", "new")
+            organize(str(root))
+            self.assertEqual((root / "Images" / "photo.jpg").read_text(), "original")
+            self.assertEqual((root / "Images" / "photo_1.jpg").read_text(), "new")
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()
