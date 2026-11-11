@@ -114,10 +114,18 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -
     moved_count = 0
     skipped_count = 0
 
+    # Destinations claimed so far in this run. In a live run the disk
+    # alone would reveal them, but a dry run moves nothing, so without
+    # this set two same-named files would be planned onto one path.
+    planned_destinations: set[Path] = set()
+
     for file_path in files:
         category = classify(file_path)
         try:
-            destination = move_file(file_path, category, target_root, dry_run)
+            destination = move_file(
+                file_path, category, target_root, dry_run,
+                taken=planned_destinations,
+            )
             verb = "Would move" if dry_run else "Moved"
             logger.info(f"{verb}: {file_path.name} -> {category}/{destination.name}")
             moved_count += 1

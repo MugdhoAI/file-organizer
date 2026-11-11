@@ -7,9 +7,11 @@ Run from the repo root with:
     python -m unittest discover tests
 """
 
+import io
 import logging
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -91,6 +93,15 @@ class TestResolveDestination(unittest.TestCase):
                 folder / "photo_2.jpg",
             )
 
+    def test_taken_paths_count_as_occupied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            taken = {folder / "photo.jpg"}
+            self.assertEqual(
+                resolve_destination(folder, Path("photo.jpg"), taken=taken),
+                folder / "photo_1.jpg",
+            )
+
 
 class TestMoveFile(unittest.TestCase):
     def test_live_move_creates_category_folder(self):
@@ -110,6 +121,17 @@ class TestMoveFile(unittest.TestCase):
             self.assertEqual(dest, root / "Images" / "photo.jpg")
             self.assertTrue(source.exists())
             self.assertFalse((root / "Images").exists())
+
+    def test_dry_run_with_shared_taken_set_plans_unique_destinations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = make_file(root / "a", "report.pdf")
+            second = make_file(root / "b", "report.pdf")
+            taken = set()
+            dest_a = move_file(first, "Documents", root, dry_run=True, taken=taken)
+            dest_b = move_file(second, "Documents", root, dry_run=True, taken=taken)
+            self.assertEqual(dest_a, root / "Documents" / "report.pdf")
+            self.assertEqual(dest_b, root / "Documents" / "report_1.pdf")
 
 
 class TestOrganize(unittest.TestCase):
@@ -198,6 +220,28 @@ class TestOrganize(unittest.TestCase):
             summary = organize(str(root))
             self.assertEqual(summary["moved"], 0)
             self.assertTrue(nested.exists())
+
+    def test_dry_run_recursive_plans_unique_destination_per_same_named_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "a", "report.pdf")
+            make_file(root / "b", "report.pdf")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                summary = organize(str(root), dry_run=True, recursive=True)
+            self.assertEqual(summary["moved"], 2)
+            planned = [
+                line.split("-> ")[-1].strip()
+                for line in out.getvalue().splitlines()
+                if "Would move" in line
+            ]
+            self.assertEqual(
+                sorted(planned),
+                ["Documents/report.pdf", "Documents/report_1.pdf"],
+            )
+            # A dry run still moves nothing.
+            self.assertTrue((root / "a" / "report.pdf").exists())
+            self.assertTrue((root / "b" / "report.pdf").exists())
 
 
 class TestCollectFiles(unittest.TestCase):

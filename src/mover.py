@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 
 
-def resolve_destination(dest_folder: Path, file_path: Path) -> Path:
+def resolve_destination(dest_folder: Path, file_path: Path, taken=None) -> Path:
     """
     Work out the final destination path for a file, avoiding overwrites.
 
@@ -21,12 +21,18 @@ def resolve_destination(dest_folder: Path, file_path: Path) -> Path:
     Args:
         dest_folder: The category folder the file is being moved into.
         file_path: The original file being moved.
+        taken: Optional set of destination paths already claimed earlier
+            in the same run. They count as occupied even when nothing is
+            on disk yet, which is what happens throughout a dry run:
+            without it, two same-named files would both be planned onto
+            the exact same destination.
 
     Returns:
-        A Path that is guaranteed not to already exist.
+        A Path that does not already exist and is not in taken.
     """
+    taken = taken if taken is not None else set()
     candidate = dest_folder / file_path.name
-    if not candidate.exists():
+    if not candidate.exists() and candidate not in taken:
         return candidate
 
     stem = file_path.stem       # filename without extension
@@ -34,12 +40,12 @@ def resolve_destination(dest_folder: Path, file_path: Path) -> Path:
     counter = 1
     while True:
         candidate = dest_folder / f"{stem}_{counter}{extension}"
-        if not candidate.exists():
+        if not candidate.exists() and candidate not in taken:
             return candidate
         counter += 1
 
 
-def move_file(file_path: Path, category: str, target_root: Path, dry_run: bool) -> Path:
+def move_file(file_path: Path, category: str, target_root: Path, dry_run: bool, taken=None) -> Path:
     """
     Move a single file into its category folder.
 
@@ -50,6 +56,10 @@ def move_file(file_path: Path, category: str, target_root: Path, dry_run: bool) 
         dry_run: If True, no actual move happens — the planned
             destination is still calculated and returned so it can
             be logged/printed for preview.
+        taken: Optional set of destinations already claimed in this
+            run, forwarded to resolve_destination. The chosen
+            destination is added to it, so later files in the same
+            run plan around it.
 
     Returns:
         The destination path the file was (or would be) moved to.
@@ -63,7 +73,9 @@ def move_file(file_path: Path, category: str, target_root: Path, dry_run: bool) 
     if not dry_run:
         dest_folder.mkdir(exist_ok=True)
 
-    destination = resolve_destination(dest_folder, file_path)
+    destination = resolve_destination(dest_folder, file_path, taken)
+    if taken is not None:
+        taken.add(destination)
 
     if not dry_run:
         shutil.move(str(file_path), str(destination))
