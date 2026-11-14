@@ -10,9 +10,6 @@ Usage:
     python main.py --path ~/Downloads
     python main.py --path ~/Downloads --dry-run
     python main.py --path ~/Downloads --recursive
-    python main.py --path ~/Downloads --exclude "*.tmp"
-    python main.py --path ~/Downloads --config rules.json
-    python main.py --path ~/Downloads --undo
 """
 
 import argparse
@@ -68,7 +65,8 @@ def is_organizer_log(name: str) -> bool:
     return name.startswith("organizer_") and name.endswith(".log")
 
 
-def collect_files(target_root: Path, recursive: bool) -> list[Path]:
+def collect_files(target_root: Path, recursive: bool,
+                  extra_categories: set[str] | None = None) -> list[Path]:
     """
     Gather the files to organize, in sorted order so runs are
     deterministic: the log lines and the summary come out the same
@@ -77,14 +75,19 @@ def collect_files(target_root: Path, recursive: bool) -> list[Path]:
     Non-recursive mode only looks at files directly in target_root.
     Recursive mode walks subdirectories but never descends into
     category folders created by earlier runs, or into hidden folders.
+    Category folders include any custom categories named by
+    extra_categories (for example from user overrides): without them
+    a recursive run would collect files an earlier run already sorted
+    into a custom folder and rename them again on every run.
     """
     if not recursive:
         return sorted(f for f in target_root.iterdir() if f.is_file())
 
+    skip = set(CATEGORIES) | set(extra_categories or ())
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(target_root):
         dirnames[:] = [
-            d for d in dirnames if d not in CATEGORIES and not d.startswith(".")
+            d for d in dirnames if d not in skip and not d.startswith(".")
         ]
         for name in sorted(filenames):
             files.append(Path(dirpath) / name)
@@ -128,7 +131,10 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
     # Hidden files (dotfiles) are never moved: sorting .env or .bashrc
     # into Other would be a nasty surprise. The organizer's own log
     # files from earlier runs are skipped too.
-    candidates = collect_files(target_root, recursive)
+    candidates = collect_files(
+        target_root, recursive,
+        extra_categories=set(overrides.values()) if overrides else None,
+    )
     files = [
         f for f in candidates
         if not f.name.startswith(".") and not is_organizer_log(f.name)
