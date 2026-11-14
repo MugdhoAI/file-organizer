@@ -10,6 +10,9 @@ Usage:
     python main.py --path ~/Downloads
     python main.py --path ~/Downloads --dry-run
     python main.py --path ~/Downloads --recursive
+    python main.py --path ~/Downloads --exclude "*.tmp"
+    python main.py --path ~/Downloads --config rules.json
+    python main.py --path ~/Downloads --undo
 """
 
 import argparse

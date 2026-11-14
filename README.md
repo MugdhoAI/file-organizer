@@ -11,6 +11,7 @@ $ python main.py --path ~/Downloads --dry-run
 08:19:04 | Would move: photo1.jpg -> Images/photo1.jpg
 08:19:04 | Would move: song.mp3 -> Audio/song.mp3
 08:19:04 | Done. 3 files organized, 0 skipped.
+08:19:04 | By category: Audio 1, Documents 1, Images 1.
 ```
 
 ## Features
@@ -20,8 +21,12 @@ $ python main.py --path ~/Downloads --dry-run
 - **Recursive mode** also organizes files in subdirectories with `--recursive`, while never descending into category folders or hidden folders
 - **Hidden files are left alone** dotfiles such as `.env` are never moved, so config files stay where they are
 - **Collision handling** renames a file if the destination filename already exists, such as `photo_1.jpg` or `photo_2.jpg`, instead of overwriting existing data
+- **Exclude patterns** leave files matching a glob, such as `*.tmp`, exactly where they are with `--exclude`
+- **Custom category rules** define your own extension to category mapping in a JSON file with `--config`, for example `{".nef": "Images"}`; your rules win over the built-in map
+- **Undo** reverses the most recent run from its log file with `--undo`, moving files back to the target root under their original names
 - **Logging** writes a timestamped `.log` file into the target directory so every move can be reviewed later
-- **Run summary** `organize()` returns a dict with moved count, skipped count, and dry run flag, so scripts can check the result
+- **Run summary** `organize()` returns a dict with moved count, skipped count, dry run flag, and per-category counts under `by_category`, so scripts can check the result
+- **Deterministic order** files are processed in sorted order, so the log and the summary come out the same way every time for the same directory
 - **No external dependencies** uses only the Python standard library: `pathlib`, `shutil`, `argparse`, and `logging`
 
 ## Tech Stack
@@ -56,6 +61,21 @@ python main.py --path ~/Downloads
 
 # Also organize files in subdirectories
 python main.py --path ~/Downloads --recursive
+
+# Leave temp files and drafts where they are
+python main.py --path ~/Downloads --exclude "*.tmp" --exclude "draft*"
+
+# Use your own category rules from a JSON file
+python main.py --path ~/Downloads --config rules.json
+
+# Reverse the most recent run, using its log file
+python main.py --path ~/Downloads --undo
+```
+
+A config file maps extensions to category names, for example:
+
+```json
+{".nef": "Images", ".blend": "Code"}
 ```
 
 ## Project Structure
@@ -79,7 +99,9 @@ python -m unittest discover tests
 
 The suite covers classification (including new extensions and case
 insensitivity), collision numbering, live and dry run moves, hidden
-file skipping, recursive mode, and repeated runs in one process.
+file skipping, recursive mode, repeated runs in one process, sorted
+run order, exclude patterns, custom category rules from a JSON config,
+undo from the run log, and per-category summary counts.
 
 ## What I Learned
 
@@ -87,9 +109,10 @@ Separating "decide what should happen" in `classifier.py` from "actually do it" 
 
 ## Future Improvements
 
-- [ ] User defined category rules via a JSON config file instead of hardcoded extensions
-- [ ] `--undo` flag that reverses the last run using the log file
+- [x] User defined category rules via a JSON config file instead of hardcoded extensions
+- [x] `--undo` flag that reverses the last run using the log file
 - [x] Optional recursive mode for subdirectories
+- [ ] `--older-than` flag that only organizes files not modified recently
 
 ## Author
 
