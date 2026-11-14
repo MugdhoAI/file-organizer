@@ -15,7 +15,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from main import collect_files, main, organize
+from main import collect_files, main, organize, undo_last_run
 from src.classifier import (
     CATEGORIES,
     CATEGORY_MAP,
@@ -347,6 +347,65 @@ class TestOrganize(unittest.TestCase):
             self.assertTrue((root / "b" / "report.pdf").exists())
 
 
+class TestUndo(unittest.TestCase):
+    def test_undo_restores_files_to_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            make_file(root, "report.pdf")
+            organize(str(root))
+            self.assertTrue((root / "Images" / "photo.jpg").exists())
+            summary = undo_last_run(str(root))
+            self.assertEqual(summary["undone"], 2)
+            self.assertEqual(summary["missing"], 0)
+            self.assertTrue((root / "photo.jpg").exists())
+            self.assertTrue((root / "report.pdf").exists())
+
+    def test_undo_counts_deleted_files_as_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            make_file(root, "report.pdf")
+            organize(str(root))
+            (root / "Images" / "photo.jpg").unlink()
+            summary = undo_last_run(str(root))
+            self.assertEqual(summary["undone"], 1)
+            self.assertEqual(summary["missing"], 1)
+            self.assertTrue((root / "report.pdf").exists())
+
+    def test_undo_restores_original_name_after_collision_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "Images", "photo.jpg", "original")
+            make_file(root, "photo.jpg", "new")
+            organize(str(root))
+            self.assertEqual(
+                (root / "Images" / "photo_1.jpg").read_text(), "new"
+            )
+            summary = undo_last_run(str(root))
+            self.assertEqual(summary["undone"], 1)
+            self.assertEqual((root / "photo.jpg").read_text(), "new")
+            self.assertEqual(
+                (root / "Images" / "photo.jpg").read_text(), "original"
+            )
+
+    def test_undo_without_any_log_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(FileNotFoundError):
+                undo_last_run(tmp)
+
+    def test_undo_after_dry_run_undoes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            organize(str(root), dry_run=True)
+            summary = undo_last_run(str(root))
+            self.assertEqual(summary, {
+                "undone": 0, "missing": 0, "log": summary["log"],
+            })
+            self.assertTrue((root / "photo.jpg").exists())
+
+
 class TestCollectFiles(unittest.TestCase):
     def test_non_recursive_only_sees_top_level(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -441,6 +500,28 @@ class TestCli(unittest.TestCase):
             with mock.patch(
                 "sys.argv",
                 ["main.py", "--path", tmp, "--config", str(config)],
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+            self.assertEqual(ctx.exception.code, 1)
+
+    def test_main_undo_flag_restores_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "photo.jpg")
+            with mock.patch("sys.argv", ["main.py", "--path", tmp]):
+                main()
+            self.assertTrue((root / "Images" / "photo.jpg").exists())
+            with mock.patch(
+                "sys.argv", ["main.py", "--path", tmp, "--undo"]
+            ):
+                main()
+            self.assertTrue((root / "photo.jpg").exists())
+
+    def test_main_undo_without_log_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "sys.argv", ["main.py", "--path", tmp, "--undo"]
             ):
                 with self.assertRaises(SystemExit) as ctx:
                     main()

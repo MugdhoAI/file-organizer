@@ -16,12 +16,13 @@ import argparse
 import fnmatch
 import logging
 import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from src.classifier import CATEGORIES, classify, load_category_overrides
-from src.mover import move_file
+from src.mover import move_file, resolve_destination
 
 
 def setup_logging(target_root: Path) -> logging.Logger:
@@ -170,6 +171,74 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
     return {"moved": moved_count, "skipped": skipped_count, "dry_run": dry_run}
 
 
+def parse_undo_moves(log_path: Path) -> list[tuple[str, str]]:
+    """
+    Read the moves recorded in one run log.
+
+    Returns a list of (original name, destination relative to the
+    target root) pairs, in the order they were logged. Only "Moved:"
+    lines count: a dry run logs "Would move:" lines instead, and
+    undoing a dry run correctly undoes nothing.
+    """
+    moves: list[tuple[str, str]] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if " | Moved: " not in line:
+            continue
+        _, _, rest = line.partition(" | Moved: ")
+        source, _, dest = rest.partition(" -> ")
+        if source and dest:
+            moves.append((source.strip(), dest.strip()))
+    return moves
+
+
+def undo_last_run(target_path: str) -> dict:
+    """
+    Reverse the most recent organize run in a directory, using its log file.
+
+    Reads the newest organizer_*.log in the target directory and moves
+    each file it recorded back to the target root, under its original
+    name when that name is free. Files that are no longer where the
+    log says they are count as missing. Empty category folders are
+    left in place.
+
+    Returns:
+        A summary dict with undone count, missing count, and the name
+        of the log file used.
+
+    Raises:
+        NotADirectoryError: If target_path doesn't point to a real directory.
+        FileNotFoundError: If no organizer log exists in the directory.
+    """
+    target_root = Path(target_path).expanduser().resolve()
+
+    if not target_root.is_dir():
+        raise NotADirectoryError(f"{target_root} is not a valid directory.")
+
+    logs = sorted(target_root.glob("organizer_*.log"))
+    if not logs:
+        raise FileNotFoundError(f"No organizer log found in {target_root}.")
+
+    log_path = logs[-1]
+    moves = parse_undo_moves(log_path)
+
+    undone_count = 0
+    missing_count = 0
+    for source_name, dest_rel in moves:
+        moved_path = target_root / dest_rel
+        if not moved_path.exists():
+            missing_count += 1
+            continue
+        destination = resolve_destination(target_root, Path(source_name))
+        shutil.move(str(moved_path), str(destination))
+        undone_count += 1
+
+    return {
+        "undone": undone_count,
+        "missing": missing_count,
+        "log": log_path.name,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Organize files in a directory into category subfolders."
@@ -197,7 +266,24 @@ def main() -> None:
         help="JSON file mapping extensions to categories, e.g. "
         '\'{".nef": "Images"}\'. These rules win over the built-in map.'
     )
+    parser.add_argument(
+        "--undo", action="store_true",
+        help="Reverse the most recent organize run in --path, using "
+        "its log file. Moves files back to the target root."
+    )
     args = parser.parse_args()
+
+    if args.undo:
+        try:
+            summary = undo_last_run(args.path)
+        except (NotADirectoryError, FileNotFoundError) as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+        print(
+            f"Undone. {summary['undone']} file(s) restored, "
+            f"{summary['missing']} missing."
+        )
+        return
 
     overrides = None
     if args.config:
