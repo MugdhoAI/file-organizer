@@ -186,6 +186,16 @@ class TestOrganize(unittest.TestCase):
             self.assertEqual(summary["moved"], 1)
             self.assertTrue((root / ".env").exists())
 
+    def test_non_organizer_log_files_are_organized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "notes.log")
+            make_file(root, "organizer_20260101_000000.log")
+            summary = organize(str(root))
+            self.assertEqual(summary["moved"], 1)
+            self.assertTrue((root / "Other" / "notes.log").exists())
+            self.assertTrue((root / "organizer_20260101_000000.log").exists())
+
     def test_second_run_does_not_duplicate_log_handlers(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

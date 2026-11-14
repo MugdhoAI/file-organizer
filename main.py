@@ -52,6 +52,17 @@ def setup_logging(target_root: Path) -> logging.Logger:
     return logger
 
 
+def is_organizer_log(name: str) -> bool:
+    """
+    True for log files written by earlier runs of this tool.
+
+    Only the organizer's own timestamped logs are skipped. Other
+    .log files, such as app.log from another program, are ordinary
+    files and get organized like anything else.
+    """
+    return name.startswith("organizer_") and name.endswith(".log")
+
+
 def collect_files(target_root: Path, recursive: bool) -> list[Path]:
     """
     Gather the files to organize.
@@ -99,12 +110,12 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -
     logger.info(f"Starting organizer on {target_root} [{mode_label}]")
 
     # Hidden files (dotfiles) are never moved: sorting .env or .bashrc
-    # into Other would be a nasty surprise. The .log files written by
-    # earlier runs are skipped too.
+    # into Other would be a nasty surprise. The organizer's own log
+    # files from earlier runs are skipped too.
     candidates = collect_files(target_root, recursive)
     files = [
         f for f in candidates
-        if not f.name.startswith(".") and not f.name.endswith(".log")
+        if not f.name.startswith(".") and not is_organizer_log(f.name)
     ]
 
     if not files:
