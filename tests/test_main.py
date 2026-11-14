@@ -341,6 +341,24 @@ class TestOrganize(unittest.TestCase):
             self.assertEqual(summary["moved"], 0)
             self.assertTrue(nested.exists())
 
+    def test_recursive_second_run_leaves_custom_category_files_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "raw.nef")
+            overrides = {".nef": "Scripts"}
+            first = organize(str(root), overrides=overrides)
+            self.assertEqual(first["moved"], 1)
+            self.assertTrue((root / "Scripts" / "raw.nef").exists())
+            second = organize(
+                str(root), recursive=True, overrides=overrides
+            )
+            self.assertEqual(second["moved"], 0)
+            # The already sorted file keeps its name: a recursive run
+            # used to collect it again and rename it to raw_1.nef,
+            # then raw_2.nef on the next run, and so on.
+            self.assertTrue((root / "Scripts" / "raw.nef").exists())
+            self.assertFalse((root / "Scripts" / "raw_1.nef").exists())
+
     def test_dry_run_recursive_plans_unique_destination_per_same_named_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -447,6 +465,19 @@ class TestCollectFiles(unittest.TestCase):
                 make_file(root, name)
             names = [f.name for f in collect_files(root, recursive=False)]
             self.assertEqual(names, ["apple.jpg", "mango.jpg", "zebra.jpg"])
+
+    def test_recursive_skips_custom_category_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "Scripts", "sorted.py")
+            make_file(root, "top.jpg")
+            names = {
+                f.name
+                for f in collect_files(
+                    root, recursive=True, extra_categories={"Scripts"}
+                )
+            }
+            self.assertEqual(names, {"top.jpg"})
 
     def test_recursive_files_come_back_in_sorted_order(self):
         with tempfile.TemporaryDirectory() as tmp:
