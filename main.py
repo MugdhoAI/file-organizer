@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import fnmatch
 import logging
 import os
 import sys
@@ -86,7 +87,8 @@ def collect_files(target_root: Path, recursive: bool) -> list[Path]:
     return sorted(files)
 
 
-def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -> dict:
+def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
+             exclude: list[str] | None = None) -> dict:
     """
     Run the organizer against a target directory.
 
@@ -95,6 +97,9 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -
             (e.g. from CLI args).
         dry_run: If True, prints/logs the plan without moving files.
         recursive: If True, also organize files in subdirectories.
+        exclude: Optional list of glob patterns, matched against file
+            names. Files matching any pattern are left exactly where
+            they are, e.g. ["*.tmp", "draft*"].
 
     Returns:
         A summary dict with moved count, skipped count, and dry_run flag.
@@ -118,6 +123,14 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -
     files = [
         f for f in candidates
         if not f.name.startswith(".") and not is_organizer_log(f.name)
+    ]
+
+    # Excluded files stay exactly where they are: a temp file or a
+    # work-in-progress draft should never be swept into a folder.
+    patterns = exclude or []
+    files = [
+        f for f in files
+        if not any(fnmatch.fnmatch(f.name, pattern) for pattern in patterns)
     ]
 
     if not files:
@@ -170,10 +183,16 @@ def main() -> None:
         help="Also organize files in subdirectories. Category folders "
         "and hidden folders are never descended into."
     )
+    parser.add_argument(
+        "--exclude", action="append", default=None, metavar="PATTERN",
+        help="Leave files matching this glob pattern where they are, "
+        "e.g. --exclude '*.tmp'. Repeatable."
+    )
     args = parser.parse_args()
 
     try:
-        organize(args.path, dry_run=args.dry_run, recursive=args.recursive)
+        organize(args.path, dry_run=args.dry_run, recursive=args.recursive,
+                 exclude=args.exclude)
     except NotADirectoryError as e:
         print(f"Error: {e}")
         sys.exit(1)

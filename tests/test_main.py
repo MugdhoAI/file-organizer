@@ -186,6 +186,27 @@ class TestOrganize(unittest.TestCase):
             self.assertEqual(summary["moved"], 1)
             self.assertTrue((root / ".env").exists())
 
+    def test_exclude_pattern_skips_matching_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "draft.tmp")
+            make_file(root, "photo.jpg")
+            summary = organize(str(root), exclude=["*.tmp"])
+            self.assertEqual(summary["moved"], 1)
+            self.assertTrue((root / "draft.tmp").exists())
+            self.assertTrue((root / "Images" / "photo.jpg").exists())
+
+    def test_exclude_accepts_several_patterns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "draft.tmp")
+            make_file(root, "wip-notes.txt")
+            make_file(root, "photo.jpg")
+            summary = organize(str(root), exclude=["*.tmp", "wip-*"])
+            self.assertEqual(summary["moved"], 1)
+            self.assertTrue((root / "draft.tmp").exists())
+            self.assertTrue((root / "wip-notes.txt").exists())
+
     def test_non_organizer_log_files_are_organized(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -313,6 +334,19 @@ class TestCli(unittest.TestCase):
             ):
                 main()
             self.assertTrue((root / "Audio" / "song.mp3").exists())
+
+    def test_main_exclude_flag_reaches_organize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "draft.tmp")
+            make_file(root, "photo.jpg")
+            with mock.patch(
+                "sys.argv",
+                ["main.py", "--path", tmp, "--exclude", "*.tmp"],
+            ):
+                main()
+            self.assertTrue((root / "draft.tmp").exists())
+            self.assertTrue((root / "Images" / "photo.jpg").exists())
 
     def test_main_invalid_path_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as tmp:
