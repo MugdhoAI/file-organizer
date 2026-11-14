@@ -16,7 +16,12 @@ from pathlib import Path
 from unittest import mock
 
 from main import collect_files, main, organize
-from src.classifier import CATEGORIES, CATEGORY_MAP, classify
+from src.classifier import (
+    CATEGORIES,
+    CATEGORY_MAP,
+    classify,
+    load_category_overrides,
+)
 from src.mover import move_file, resolve_destination
 
 
@@ -63,6 +68,61 @@ class TestClassify(unittest.TestCase):
 
     def test_categories_cover_every_mapped_value(self):
         self.assertEqual(set(CATEGORIES), set(CATEGORY_MAP.values()) | {"Other"})
+
+
+class TestCategoryOverrides(unittest.TestCase):
+    def test_load_overrides_from_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "rules.json"
+            config.write_text('{".nef": "Images", ".blend": "Code"}')
+            self.assertEqual(
+                load_category_overrides(config),
+                {".nef": "Images", ".blend": "Code"},
+            )
+
+    def test_load_overrides_lowercases_extensions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "rules.json"
+            config.write_text('{".NEF": "Images"}')
+            self.assertEqual(
+                load_category_overrides(config), {".nef": "Images"}
+            )
+
+    def test_load_overrides_rejects_non_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "rules.json"
+            config.write_text('[".nef", "Images"]')
+            with self.assertRaises(ValueError):
+                load_category_overrides(config)
+
+    def test_load_overrides_rejects_extension_without_dot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "rules.json"
+            config.write_text('{"nef": "Images"}')
+            with self.assertRaises(ValueError):
+                load_category_overrides(config)
+
+    def test_load_overrides_rejects_empty_category(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "rules.json"
+            config.write_text('{".nef": "  "}')
+            with self.assertRaises(ValueError):
+                load_category_overrides(config)
+
+    def test_classify_prefers_override_over_builtin(self):
+        self.assertEqual(
+            classify(Path("script.py"), {".py": "Scripts"}), "Scripts"
+        )
+
+    def test_classify_override_adds_new_extension(self):
+        self.assertEqual(
+            classify(Path("raw.nef"), {".nef": "Images"}), "Images"
+        )
+
+    def test_classify_without_override_uses_builtin_map(self):
+        self.assertEqual(
+            classify(Path("script.py"), {".nef": "Images"}), "Code"
+        )
 
 
 class TestResolveDestination(unittest.TestCase):
@@ -185,6 +245,18 @@ class TestOrganize(unittest.TestCase):
             summary = organize(str(root))
             self.assertEqual(summary["moved"], 1)
             self.assertTrue((root / ".env").exists())
+
+    def test_organize_applies_category_overrides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "raw.nef")
+            make_file(root, "script.py")
+            summary = organize(
+                str(root), overrides={".nef": "Images", ".py": "Scripts"}
+            )
+            self.assertEqual(summary["moved"], 2)
+            self.assertTrue((root / "Images" / "raw.nef").exists())
+            self.assertTrue((root / "Scripts" / "script.py").exists())
 
     def test_exclude_pattern_skips_matching_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -347,6 +419,32 @@ class TestCli(unittest.TestCase):
                 main()
             self.assertTrue((root / "draft.tmp").exists())
             self.assertTrue((root / "Images" / "photo.jpg").exists())
+
+    def test_main_config_flag_reaches_organize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "rules.json"
+            config.write_text('{".nef": "Images"}')
+            make_file(root, "raw.nef")
+            with mock.patch(
+                "sys.argv",
+                ["main.py", "--path", tmp, "--config", str(config)],
+            ):
+                main()
+            self.assertTrue((root / "Images" / "raw.nef").exists())
+
+    def test_main_bad_config_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "rules.json"
+            config.write_text('{"nef": "Images"}')
+            with mock.patch(
+                "sys.argv",
+                ["main.py", "--path", tmp, "--config", str(config)],
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+            self.assertEqual(ctx.exception.code, 1)
 
     def test_main_invalid_path_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as tmp:

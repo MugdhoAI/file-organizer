@@ -8,6 +8,7 @@ separate from "act" makes the code easier to test and easier to reason
 about when something goes wrong.
 """
 
+import json
 from pathlib import Path
 
 # Extension -> category name.
@@ -54,12 +55,53 @@ FALLBACK_CATEGORY = "Other"
 CATEGORIES: list[str] = sorted(set(CATEGORY_MAP.values()) | {FALLBACK_CATEGORY})
 
 
-def classify(file_path: Path) -> str:
+def load_category_overrides(config_path: Path) -> dict[str, str]:
+    """
+    Read user-defined category rules from a JSON file.
+
+    The file maps extensions to category names, for example:
+        {".nef": "Images", ".blend": "Code"}
+    Keys must start with a dot and values must be non-empty strings.
+    Extensions are lowercased on load, so ".NEF" and ".nef" mean the
+    same thing.
+
+    Raises:
+        ValueError: If the file is not a JSON object, or a rule is
+            malformed.
+        OSError: If the file cannot be read.
+    """
+    with open(config_path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{config_path} must contain a JSON object mapping "
+            "extensions to categories."
+        )
+    overrides: dict[str, str] = {}
+    for extension, category in data.items():
+        if not isinstance(extension, str) or not extension.startswith("."):
+            raise ValueError(
+                f"Bad extension in {config_path}: {extension!r} "
+                "(extensions must start with a dot)."
+            )
+        if not isinstance(category, str) or not category.strip():
+            raise ValueError(
+                f"Bad category in {config_path} for {extension!r}: "
+                "categories must be non-empty strings."
+            )
+        overrides[extension.lower()] = category.strip()
+    return overrides
+
+
+def classify(file_path: Path, overrides: dict[str, str] | None = None) -> str:
     """
     Determine the category folder a file should be sorted into.
 
     Args:
         file_path: Path to the file being classified.
+        overrides: Optional user-defined rules, as returned by
+            load_category_overrides. They win over the built-in map,
+            so a user can reassign an extension or add a new one.
 
     Returns:
         The category name (e.g. "Images", "Documents"). Files whose
@@ -67,4 +109,8 @@ def classify(file_path: Path) -> str:
         than being skipped, so nothing is ever left unaccounted for.
     """
     extension = file_path.suffix.lower()
+    if overrides:
+        category = overrides.get(extension)
+        if category is not None:
+            return category
     return CATEGORY_MAP.get(extension, FALLBACK_CATEGORY)

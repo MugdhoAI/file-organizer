@@ -20,7 +20,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from src.classifier import CATEGORIES, classify
+from src.classifier import CATEGORIES, classify, load_category_overrides
 from src.mover import move_file
 
 
@@ -88,7 +88,8 @@ def collect_files(target_root: Path, recursive: bool) -> list[Path]:
 
 
 def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
-             exclude: list[str] | None = None) -> dict:
+             exclude: list[str] | None = None,
+             overrides: dict[str, str] | None = None) -> dict:
     """
     Run the organizer against a target directory.
 
@@ -100,6 +101,9 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
         exclude: Optional list of glob patterns, matched against file
             names. Files matching any pattern are left exactly where
             they are, e.g. ["*.tmp", "draft*"].
+        overrides: Optional user-defined category rules, as returned
+            by load_category_overrides. They win over the built-in
+            extension map.
 
     Returns:
         A summary dict with moved count, skipped count, and dry_run flag.
@@ -146,7 +150,7 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
     planned_destinations: set[Path] = set()
 
     for file_path in files:
-        category = classify(file_path)
+        category = classify(file_path, overrides)
         try:
             destination = move_file(
                 file_path, category, target_root, dry_run,
@@ -188,11 +192,24 @@ def main() -> None:
         help="Leave files matching this glob pattern where they are, "
         "e.g. --exclude '*.tmp'. Repeatable."
     )
+    parser.add_argument(
+        "--config", default=None, metavar="FILE",
+        help="JSON file mapping extensions to categories, e.g. "
+        '\'{".nef": "Images"}\'. These rules win over the built-in map.'
+    )
     args = parser.parse_args()
+
+    overrides = None
+    if args.config:
+        try:
+            overrides = load_category_overrides(Path(args.config))
+        except (OSError, ValueError) as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
     try:
         organize(args.path, dry_run=args.dry_run, recursive=args.recursive,
-                 exclude=args.exclude)
+                 exclude=args.exclude, overrides=overrides)
     except NotADirectoryError as e:
         print(f"Error: {e}")
         sys.exit(1)
