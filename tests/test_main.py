@@ -271,6 +271,28 @@ class TestCollectFiles(unittest.TestCase):
             names = {f.name for f in collect_files(root, recursive=True)}
             self.assertEqual(names, {"top.jpg"})
 
+    def test_files_come_back_in_sorted_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ("zebra.jpg", "apple.jpg", "mango.jpg"):
+                make_file(root, name)
+            names = [f.name for f in collect_files(root, recursive=False)]
+            self.assertEqual(names, ["apple.jpg", "mango.jpg", "zebra.jpg"])
+
+    def test_recursive_files_come_back_in_sorted_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "b", "zebra.jpg")
+            make_file(root / "a", "apple.jpg")
+            make_file(root, "mango.jpg")
+            names = [
+                str(f.relative_to(root))
+                for f in collect_files(root, recursive=True)
+            ]
+            self.assertEqual(
+                names, ["a/apple.jpg", "b/zebra.jpg", "mango.jpg"]
+            )
+
 
 class TestCli(unittest.TestCase):
     def test_main_dry_run_moves_nothing(self):

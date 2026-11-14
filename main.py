@@ -65,23 +65,25 @@ def is_organizer_log(name: str) -> bool:
 
 def collect_files(target_root: Path, recursive: bool) -> list[Path]:
     """
-    Gather the files to organize.
+    Gather the files to organize, in sorted order so runs are
+    deterministic: the log lines and the summary come out the same
+    way every time for the same directory.
 
     Non-recursive mode only looks at files directly in target_root.
     Recursive mode walks subdirectories but never descends into
     category folders created by earlier runs, or into hidden folders.
     """
     if not recursive:
-        return [f for f in target_root.iterdir() if f.is_file()]
+        return sorted(f for f in target_root.iterdir() if f.is_file())
 
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(target_root):
         dirnames[:] = [
             d for d in dirnames if d not in CATEGORIES and not d.startswith(".")
         ]
-        for name in filenames:
+        for name in sorted(filenames):
             files.append(Path(dirpath) / name)
-    return files
+    return sorted(files)
 
 
 def organize(target_path: str, dry_run: bool = False, recursive: bool = False) -> dict:
