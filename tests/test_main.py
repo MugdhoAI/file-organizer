@@ -202,17 +202,34 @@ class TestOrganize(unittest.TestCase):
             make_file(root, "report.pdf")
             make_file(root, "song.mp3")
             summary = organize(str(root))
-            self.assertEqual(summary, {"moved": 3, "skipped": 0, "dry_run": False})
+            self.assertEqual(summary, {
+                "moved": 3, "skipped": 0, "dry_run": False,
+                "by_category": {"Images": 1, "Documents": 1, "Audio": 1},
+            })
             self.assertTrue((root / "Images" / "photo.jpg").exists())
             self.assertTrue((root / "Documents" / "report.pdf").exists())
             self.assertTrue((root / "Audio" / "song.mp3").exists())
+
+    def test_summary_reports_per_category_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "a.jpg")
+            make_file(root, "b.jpg")
+            make_file(root, "report.pdf")
+            summary = organize(str(root))
+            self.assertEqual(
+                summary["by_category"], {"Images": 2, "Documents": 1}
+            )
 
     def test_dry_run_moves_nothing_but_counts_the_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_file(root, "photo.jpg")
             summary = organize(str(root), dry_run=True)
-            self.assertEqual(summary, {"moved": 1, "skipped": 0, "dry_run": True})
+            self.assertEqual(summary, {
+                "moved": 1, "skipped": 0, "dry_run": True,
+                "by_category": {"Images": 1},
+            })
             self.assertTrue((root / "photo.jpg").exists())
             self.assertFalse((root / "Images").exists())
 
@@ -220,7 +237,7 @@ class TestOrganize(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(
                 organize(tmp),
-                {"moved": 0, "skipped": 0, "dry_run": False},
+                {"moved": 0, "skipped": 0, "dry_run": False, "by_category": {}},
             )
 
     def test_invalid_path_raises(self):

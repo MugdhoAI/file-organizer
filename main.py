@@ -107,7 +107,8 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
             extension map.
 
     Returns:
-        A summary dict with moved count, skipped count, and dry_run flag.
+        A summary dict with moved count, skipped count, dry_run flag,
+        and per-category counts under "by_category".
 
     Raises:
         NotADirectoryError: If target_path doesn't point to a real directory.
@@ -140,10 +141,11 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
 
     if not files:
         logger.info("No files found to organize.")
-        return {"moved": 0, "skipped": 0, "dry_run": dry_run}
+        return {"moved": 0, "skipped": 0, "dry_run": dry_run, "by_category": {}}
 
     moved_count = 0
     skipped_count = 0
+    by_category: dict[str, int] = {}
 
     # Destinations claimed so far in this run. In a live run the disk
     # alone would reveal them, but a dry run moves nothing, so without
@@ -160,6 +162,7 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
             verb = "Would move" if dry_run else "Moved"
             logger.info(f"{verb}: {file_path.name} -> {category}/{destination.name}")
             moved_count += 1
+            by_category[category] = by_category.get(category, 0) + 1
         except PermissionError:
             logger.warning(f"Skipped (permission denied): {file_path.name}")
             skipped_count += 1
@@ -168,7 +171,18 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
             skipped_count += 1
 
     logger.info(f"Done. {moved_count} file(s) organized, {skipped_count} skipped.")
-    return {"moved": moved_count, "skipped": skipped_count, "dry_run": dry_run}
+    if by_category:
+        breakdown = ", ".join(
+            f"{category} {count}"
+            for category, count in sorted(by_category.items())
+        )
+        logger.info(f"By category: {breakdown}.")
+    return {
+        "moved": moved_count,
+        "skipped": skipped_count,
+        "dry_run": dry_run,
+        "by_category": by_category,
+    }
 
 
 def parse_undo_moves(log_path: Path) -> list[tuple[str, str]]:
