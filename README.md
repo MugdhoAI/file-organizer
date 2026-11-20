@@ -112,7 +112,7 @@ Separating "decide what should happen" in `classifier.py` from "actually do it" 
 - [x] User defined category rules via a JSON config file instead of hardcoded extensions
 - [x] `--undo` flag that reverses the last run using the log file
 - [x] Optional recursive mode for subdirectories
-- [ ] `--older-than` flag that only organizes files not modified recently
+- [x] `--older-than` flag that only organizes files not modified recently
 
 ## Author
 

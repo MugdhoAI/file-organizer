@@ -18,6 +18,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -94,9 +95,39 @@ def collect_files(target_root: Path, recursive: bool,
     return sorted(files)
 
 
+def parse_older_than(value: str) -> int:
+    """
+    Parse an --older-than value into a number of days.
+
+    Accepts a plain number of days, such as "30", or the same with a
+    trailing "d", such as "30d". Used as the argparse type for the
+    --older-than flag, so bad values are rejected by argparse itself.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a non-negative
+            whole number of days.
+    """
+    text = value.strip().lower()
+    if text.endswith("d"):
+        text = text[:-1].strip()
+    try:
+        days = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid older-than value: {value!r} "
+            "(expected a number of days, e.g. 30 or 30d)"
+        )
+    if days < 0:
+        raise argparse.ArgumentTypeError(
+            "older-than must be zero or more days"
+        )
+    return days
+
+
 def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
              exclude: list[str] | None = None,
-             overrides: dict[str, str] | None = None) -> dict:
+             overrides: dict[str, str] | None = None,
+             older_than: int | None = None) -> dict:
     """
     Run the organizer against a target directory.
 
@@ -111,6 +142,10 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
         overrides: Optional user-defined category rules, as returned
             by load_category_overrides. They win over the built-in
             extension map.
+        older_than: Optional number of days. When given, only files
+            whose last modification time is at least this many days
+            ago are organized. More recently modified files are left
+            exactly where they are.
 
     Returns:
         A summary dict with moved count, skipped count, dry_run flag,
@@ -147,6 +182,12 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
         f for f in files
         if not any(fnmatch.fnmatch(f.name, pattern) for pattern in patterns)
     ]
+
+    # Recently modified files stay where they are when --older-than
+    # is given: a file still being worked on should not be swept away.
+    if older_than is not None:
+        cutoff = time.time() - older_than * 86400
+        files = [f for f in files if f.stat().st_mtime <= cutoff]
 
     if not files:
         logger.info("No files found to organize.")
@@ -290,6 +331,12 @@ def main() -> None:
         '\'{".nef": "Images"}\'. These rules win over the built-in map.'
     )
     parser.add_argument(
+        "--older-than", type=parse_older_than, default=None, metavar="DAYS",
+        help="Only organize files not modified in the last DAYS days, "
+        "e.g. --older-than 30 or --older-than 30d. Recently modified "
+        "files are left where they are."
+    )
+    parser.add_argument(
         "--undo", action="store_true",
         help="Reverse the most recent organize run in --path, using "
         "its log file. Moves files back to the target root."
@@ -318,7 +365,8 @@ def main() -> None:
 
     try:
         organize(args.path, dry_run=args.dry_run, recursive=args.recursive,
-                 exclude=args.exclude, overrides=overrides)
+                 exclude=args.exclude, overrides=overrides,
+                 older_than=args.older_than)
     except NotADirectoryError as e:
         print(f"Error: {e}")
         sys.exit(1)
