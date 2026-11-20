@@ -7,15 +7,18 @@ Run from the repo root with:
     python -m unittest discover tests
 """
 
+import argparse
 import io
 import logging
+import os
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from main import collect_files, main, organize, undo_last_run
+from main import collect_files, main, organize, parse_older_than, undo_last_run
 from src.classifier import (
     CATEGORIES,
     CATEGORY_MAP,
@@ -382,6 +385,61 @@ class TestOrganize(unittest.TestCase):
             self.assertTrue((root / "b" / "report.pdf").exists())
 
 
+def make_old_file(directory: Path, name: str, days_ago: float,
+                    content: str = "x") -> Path:
+    path = make_file(directory, name, content)
+    stamp = time.time() - days_ago * 86400
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+class TestParseOlderThan(unittest.TestCase):
+    def test_plain_number_of_days(self):
+        self.assertEqual(parse_older_than("30"), 30)
+
+    def test_number_with_d_suffix(self):
+        self.assertEqual(parse_older_than("30d"), 30)
+
+    def test_zero_days_is_allowed(self):
+        self.assertEqual(parse_older_than("0"), 0)
+
+    def test_invalid_value_raises_argument_type_error(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            parse_older_than("soon")
+
+    def test_negative_value_raises_argument_type_error(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            parse_older_than("-5")
+
+
+class TestOlderThanOrganize(unittest.TestCase):
+    def test_only_files_older_than_threshold_are_moved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_old_file(root, "old.jpg", days_ago=40)
+            make_file(root, "new.jpg")
+            summary = organize(str(root), older_than=30)
+            self.assertEqual(summary["moved"], 1)
+            self.assertTrue((root / "Images" / "old.jpg").exists())
+            self.assertTrue((root / "new.jpg").exists())
+
+    def test_without_older_than_recent_files_are_moved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "new.jpg")
+            summary = organize(str(root))
+            self.assertEqual(summary["moved"], 1)
+            self.assertTrue((root / "Images" / "new.jpg").exists())
+
+    def test_older_than_with_no_old_files_moves_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root, "new.jpg")
+            summary = organize(str(root), older_than=30)
+            self.assertEqual(summary["moved"], 0)
+            self.assertTrue((root / "new.jpg").exists())
+
+
 class TestUndo(unittest.TestCase):
     def test_undo_restores_files_to_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -552,6 +610,29 @@ class TestCli(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     main()
             self.assertEqual(ctx.exception.code, 1)
+
+    def test_main_older_than_flag_reaches_organize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_old_file(root, "old.jpg", days_ago=40)
+            make_file(root, "new.jpg")
+            with mock.patch(
+                "sys.argv",
+                ["main.py", "--path", tmp, "--older-than", "30d"],
+            ):
+                main()
+            self.assertTrue((root / "Images" / "old.jpg").exists())
+            self.assertTrue((root / "new.jpg").exists())
+
+    def test_main_older_than_invalid_value_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch(
+                "sys.argv",
+                ["main.py", "--path", tmp, "--older-than", "soon"],
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    main()
+            self.assertEqual(ctx.exception.code, 2)
 
     def test_main_undo_flag_restores_files(self):
         with tempfile.TemporaryDirectory() as tmp:
