@@ -23,7 +23,7 @@ $ python main.py --path ~/Downloads --dry-run
 - **Collision handling** renames a file if the destination filename already exists, such as `photo_1.jpg` or `photo_2.jpg`, instead of overwriting existing data
 - **Exclude patterns** leave files matching a glob, such as `*.tmp`, exactly where they are with `--exclude`
 - **Custom category rules** define your own extension to category mapping in a JSON file with `--config`, for example `{".nef": "Images"}`; your rules win over the built-in map
-- **Undo** reverses the most recent run from its log file with `--undo`, moving files back to the target root under their original names
+- **Undo** reverses the most recent run from its log file with `--undo`, moving files back to their original locations under their original names, including files collected from subfolders by a recursive run
 - **Logging** writes a timestamped `.log` file into the target directory so every move can be reviewed later
 - **Run summary** `organize()` returns a dict with moved count, skipped count, dry run flag, and per-category counts under `by_category`, so scripts can check the result
 - **Deterministic order** files are processed in sorted order, so the log and the summary come out the same way every time for the same directory

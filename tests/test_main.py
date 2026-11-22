@@ -18,7 +18,14 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from main import collect_files, main, organize, parse_older_than, undo_last_run
+from main import (
+    collect_files,
+    main,
+    organize,
+    parse_older_than,
+    parse_undo_moves,
+    undo_last_run,
+)
 from src.classifier import (
     CATEGORIES,
     CATEGORY_MAP,
@@ -481,6 +488,60 @@ class TestUndo(unittest.TestCase):
             self.assertEqual(
                 (root / "Images" / "photo.jpg").read_text(), "original"
             )
+
+    def test_undo_recursive_same_named_files_restore_true_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "a", "report.pdf", "from a")
+            make_file(root / "b", "report.pdf", "from b")
+            summary = organize(str(root), recursive=True)
+            self.assertEqual(summary["moved"], 2)
+            # The second file was renamed on the way in, because
+            # Documents/report.pdf was already taken.
+            self.assertEqual(
+                (root / "Documents" / "report.pdf").read_text(), "from a"
+            )
+            self.assertEqual(
+                (root / "Documents" / "report_1.pdf").read_text(), "from b"
+            )
+            undone = undo_last_run(str(root))
+            self.assertEqual(undone["undone"], 2)
+            self.assertEqual(undone["missing"], 0)
+            # Each file is back in its own folder, under its true
+            # original name, with its own contents.
+            self.assertEqual((root / "a" / "report.pdf").read_text(), "from a")
+            self.assertEqual((root / "b" / "report.pdf").read_text(), "from b")
+            self.assertFalse((root / "report.pdf").exists())
+            self.assertFalse((root / "report_1.pdf").exists())
+
+    def test_parse_undo_moves_records_original_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "organizer_20260101_000000.log"
+            log.write_text(
+                "08:00:00 | Moved: a/report.pdf -> Documents/report.pdf\n"
+                "08:00:00 | Moved: b/report.pdf -> Documents/report_1.pdf\n"
+            )
+            self.assertEqual(
+                parse_undo_moves(log),
+                [
+                    ("a/report.pdf", "Documents/report.pdf"),
+                    ("b/report.pdf", "Documents/report_1.pdf"),
+                ],
+            )
+
+    def test_undo_with_old_format_log_restores_bare_names_to_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_file(root / "Documents", "report.pdf", "old log")
+            log = root / "organizer_20260101_000000.log"
+            log.write_text(
+                "08:00:00 | Moved: report.pdf -> Documents/report.pdf\n"
+            )
+            summary = undo_last_run(str(root))
+            self.assertEqual(summary["undone"], 1)
+            self.assertEqual(summary["missing"], 0)
+            self.assertEqual((root / "report.pdf").read_text(), "old log")
 
     def test_undo_without_any_log_raises(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -210,7 +210,17 @@ def organize(target_path: str, dry_run: bool = False, recursive: bool = False,
                 taken=planned_destinations,
             )
             verb = "Would move" if dry_run else "Moved"
-            logger.info(f"{verb}: {file_path.name} -> {category}/{destination.name}")
+            # Record the original path relative to the target root,
+            # not just the bare name. Undo needs the folder a file
+            # came from: two same-named files from different folders
+            # in a recursive run would otherwise both be restored to
+            # the root, and the second would be renamed, for example
+            # report.pdf would come back as report_1.pdf.
+            try:
+                source_rel = file_path.relative_to(target_root).as_posix()
+            except ValueError:
+                source_rel = file_path.name
+            logger.info(f"{verb}: {source_rel} -> {category}/{destination.name}")
             moved_count += 1
             by_category[category] = by_category.get(category, 0) + 1
         except PermissionError:
@@ -239,10 +249,16 @@ def parse_undo_moves(log_path: Path) -> list[tuple[str, str]]:
     """
     Read the moves recorded in one run log.
 
-    Returns a list of (original name, destination relative to the
-    target root) pairs, in the order they were logged. Only "Moved:"
-    lines count: a dry run logs "Would move:" lines instead, and
-    undoing a dry run correctly undoes nothing.
+    Returns a list of (original path relative to the target root,
+    destination relative to the target root) pairs, in the order
+    they were logged. Only "Moved:" lines count: a dry run logs
+    "Would move:" lines instead, and undoing a dry run correctly
+    undoes nothing.
+
+    Logs written before the original path was recorded hold only
+    the bare file name, for example "report.pdf". Those entries
+    still parse the same way: a bare name has no folder part, so
+    undo restores such files to the target root, exactly as before.
     """
     moves: list[tuple[str, str]] = []
     for line in log_path.read_text(encoding="utf-8").splitlines():
@@ -260,10 +276,14 @@ def undo_last_run(target_path: str) -> dict:
     Reverse the most recent organize run in a directory, using its log file.
 
     Reads the newest organizer_*.log in the target directory and moves
-    each file it recorded back to the target root, under its original
-    name when that name is free. Files that are no longer where the
-    log says they are count as missing. Empty category folders are
-    left in place.
+    each file it recorded back to its original location, under its
+    original name when that name is free there. The original location
+    is the path recorded in the log relative to the target root, and
+    its folder is recreated if it no longer exists. Logs written
+    before the original path was recorded hold only a bare name, so
+    those files are restored to the target root, as before. Files
+    that are no longer where the log says they are count as missing.
+    Empty category folders are left in place.
 
     Returns:
         A summary dict with undone count, missing count, and the name
@@ -287,12 +307,15 @@ def undo_last_run(target_path: str) -> dict:
 
     undone_count = 0
     missing_count = 0
-    for source_name, dest_rel in moves:
+    for source_rel, dest_rel in moves:
         moved_path = target_root / dest_rel
         if not moved_path.exists():
             missing_count += 1
             continue
-        destination = resolve_destination(target_root, Path(source_name))
+        original = Path(source_rel)
+        restore_folder = target_root / original.parent
+        restore_folder.mkdir(parents=True, exist_ok=True)
+        destination = resolve_destination(restore_folder, original)
         shutil.move(str(moved_path), str(destination))
         undone_count += 1
 
@@ -339,7 +362,7 @@ def main() -> None:
     parser.add_argument(
         "--undo", action="store_true",
         help="Reverse the most recent organize run in --path, using "
-        "its log file. Moves files back to the target root."
+        "its log file. Moves files back to their original locations."
     )
     args = parser.parse_args()
 
